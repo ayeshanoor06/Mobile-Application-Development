@@ -222,3 +222,4 @@ public class MeshService {
     }
     public int getSeenMessageCount() { return 0; }
 }
+

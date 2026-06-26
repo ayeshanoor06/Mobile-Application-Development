@@ -1,10 +1,13 @@
 package com.ayesha.embernet;
 
+import android.Manifest;
 import android.content.Context;
 import android.location.Location;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+
+import androidx.annotation.RequiresPermission;
 
 public class BroadcastEngine {
 
@@ -193,6 +196,7 @@ public class BroadcastEngine {
 
     // ── Physical broadcast ────────────────────────────────────────────────
 
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     private void doPhysicalBroadcast(SOSMessage message) {
         byte[] payload = message.toBytes();
         Log.d(TAG, "BROADCAST [" + broadcastNumber + "] "

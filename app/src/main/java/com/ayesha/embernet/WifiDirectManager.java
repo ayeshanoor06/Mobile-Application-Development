@@ -1,5 +1,6 @@
 package com.ayesha.embernet;
 
+import android.Manifest;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -13,6 +14,8 @@ import android.net.wifi.p2p.WifiP2pManager;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+
+import androidx.annotation.RequiresPermission;
 
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -83,6 +86,7 @@ public class WifiDirectManager {
         Log.d(TAG, "Wi-Fi Direct discovery started");
     }
 
+    @RequiresPermission(allOf = {Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.NEARBY_WIFI_DEVICES})
     private void runDiscoveryCycle() {
         if (!isDiscovering) return;
 
@@ -138,6 +142,7 @@ public class WifiDirectManager {
         }
     }
 
+    @RequiresPermission(allOf = {Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.NEARBY_WIFI_DEVICES})
     private void connectAndSend(WifiP2pDevice peer,
                                 byte[] payload) {
         WifiP2pConfig config = new WifiP2pConfig();
@@ -363,6 +368,7 @@ public class WifiDirectManager {
                 + (enabled ? "ENABLED ✓" : "DISABLED ❌"));
     }
 
+    @RequiresPermission(allOf = {Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.NEARBY_WIFI_DEVICES})
     private void onPeersChanged() {
         p2pManager.requestPeers(channel, peerList -> {
             Collection<WifiP2pDevice> peers =

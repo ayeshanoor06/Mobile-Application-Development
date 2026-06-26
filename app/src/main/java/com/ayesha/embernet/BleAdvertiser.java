@@ -14,18 +14,17 @@ import java.util.Arrays;
 import java.util.UUID;
 
 public class BleAdvertiser {
-
     private static final String TAG = "BleAdvertiser";
 
     public static final UUID EMBERNET_SERVICE_UUID =
-            UUID.fromString(
-                    "0000EA01-0000-1000-8000-00805F9B34FB");
+            UUID.fromString("0000EA01-0000-1000-8000-00805F9B34FB");
 
-    private final Context           context;
-    private       BluetoothLeAdvertiser advertiser;
-    private       AdvertiseCallback activeCallback;
-    private       boolean           isAdvertising = false;
-    private       byte[]            lastPayload;
+    private final Context context;
+    private BluetoothLeAdvertiser advertiser;
+    private AdvertiseCallback activeCallback;
+
+    private boolean isAdvertising = false;
+    private byte[] lastPayload;
 
     public interface AdvertiseListener {
         void onStarted();
@@ -37,16 +36,14 @@ public class BleAdvertiser {
     }
 
     // ── Start advertising
-
-    public void startAdvertising(byte[] fullPayload,
-                                 AdvertiseListener listener) {
+    public void startAdvertising(byte[] fullPayload, AdvertiseListener listener) {
         if (isAdvertising) {
             stopAdvertising();
         }
 
         BluetoothManager btManager =
-                (BluetoothManager) context.getSystemService(
-                        Context.BLUETOOTH_SERVICE);
+                (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
+
         if (btManager == null) {
             Log.e(TAG, "BluetoothManager unavailable");
             if (listener != null) listener.onFailed(-1);
@@ -54,6 +51,7 @@ public class BleAdvertiser {
         }
 
         BluetoothAdapter adapter = btManager.getAdapter();
+
         if (adapter == null || !adapter.isEnabled()) {
             Log.e(TAG, "Bluetooth not enabled");
             if (listener != null) listener.onFailed(-2);
@@ -67,6 +65,7 @@ public class BleAdvertiser {
         }
 
         advertiser = adapter.getBluetoothLeAdvertiser();
+
         if (advertiser == null) {
             Log.e(TAG, "Could not get BLE advertiser");
             if (listener != null) listener.onFailed(-4);
@@ -74,17 +73,12 @@ public class BleAdvertiser {
         }
 
         lastPayload = fullPayload;
-
-
-        byte[] advertPayload = buildAdvertPayload(
-                fullPayload);
+        byte[] advertPayload = buildAdvertPayload(fullPayload);
 
         AdvertiseSettings settings =
                 new AdvertiseSettings.Builder()
-                        .setAdvertiseMode(
-                                AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
-                        .setTxPowerLevel(
-                                AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+                        .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+                        .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
                         .setConnectable(true)
                         .setTimeout(0)
                         .build();
@@ -92,22 +86,16 @@ public class BleAdvertiser {
         AdvertiseData data = new AdvertiseData.Builder()
                 .setIncludeDeviceName(false)
                 .setIncludeTxPowerLevel(false)
-                .addServiceUuid(new ParcelUuid(
-                        EMBERNET_SERVICE_UUID))
-                .addServiceData(
-                        new ParcelUuid(EMBERNET_SERVICE_UUID),
-                        advertPayload)
+                .addServiceUuid(new ParcelUuid(EMBERNET_SERVICE_UUID))
+                .addServiceData(new ParcelUuid(EMBERNET_SERVICE_UUID), advertPayload)
                 .build();
 
         activeCallback = new AdvertiseCallback() {
             @Override
-            public void onStartSuccess(
-                    AdvertiseSettings settings) {
+            public void onStartSuccess(AdvertiseSettings settings) {
                 isAdvertising = true;
-                Log.d(TAG, "BLE advertising ACTIVE"
-                        + " payload=" + fullPayload.length
-                        + "b advert=" + advertPayload.length
-                        + "b");
+                Log.d(TAG, "BLE advertising ACTIVE payload=" + fullPayload.length
+                        + "b advert=" + advertPayload.length + "b");
                 if (listener != null) listener.onStarted();
             }
 
@@ -134,78 +122,64 @@ public class BleAdvertiser {
                     default:
                         reason = "code=" + errorCode;
                 }
-                Log.e(TAG, "BLE advertising FAILED: "
-                        + reason);
+                Log.e(TAG, "BLE advertising FAILED: " + reason);
                 if (listener != null) {
                     listener.onFailed(errorCode);
                 }
             }
         };
 
-        advertiser.startAdvertising(
-                settings, data, activeCallback);
+        advertiser.startAdvertising(settings, data, activeCallback);
     }
 
     // ── Stop advertising
-
     public void stopAdvertising() {
-        if (advertiser != null
-                && activeCallback != null) {
+        if (advertiser != null && activeCallback != null) {
             try {
-                advertiser.stopAdvertising(
-                        activeCallback);
+                advertiser.stopAdvertising(activeCallback);
             } catch (Exception e) {
-                Log.e(TAG, "Stop error: "
-                        + e.getMessage());
+                Log.e(TAG, "Stop error: " + e.getMessage());
             }
         }
-        isAdvertising  = false;
+        isAdvertising = false;
         activeCallback = null;
     }
 
     // ── Payload builder
-
-    // Builds a compact payload that fits in BLE limit
-    // We store key fields only: id, device, lat, lon,
-    // battery, hops — enough to show alert on Phone B
     private byte[] buildAdvertPayload(byte[] fullPayload) {
         try {
-            // Parse the SOSMessage and build a mini payload
-            // Format: id(8) + deviceId(6) + lat(4) +
-            //         lon(4) + battery(1) + hops(1) = 24b
-            // This always fits in BLE service data field
-            String json = new String(fullPayload,
-                    java.nio.charset.StandardCharsets.UTF_8);
-            org.json.JSONObject obj =
-                    new org.json.JSONObject(json);
+            String json = new String(fullPayload, java.nio.charset.StandardCharsets.UTF_8);
+            org.json.JSONObject obj = new org.json.JSONObject(json);
 
-            String msgId   = obj.optString("id", "000000");
-            String devId   = obj.optString("dev", "UNKNWN");
-            double lat     = obj.optDouble("lat", 0.0);
-            double lon     = obj.optDouble("lon", 0.0);
-            int    battery = obj.optInt("bat", 0);
-            int    hops    = obj.optInt("hop", 0);
+            String msgId = obj.optString("id", "000000");
+            String devId = obj.optString("dev", "UNKNWN");
+            String type = obj.optString("typ", SOSMessage.TYPE_SOS);
+            double lat = obj.optDouble("lat", 0.0);
+            double lon = obj.optDouble("lon", 0.0);
+            int battery = obj.optInt("bat", 0);
+            int hops = obj.optInt("hop", 0);
 
             // Pack into 20 bytes
-            java.nio.ByteBuffer buf =
-                    java.nio.ByteBuffer.allocate(20);
+            java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocate(20);
 
-            // Magic header: 0xEB 0xAD = "EmBerNeT Alert Data"
+            // Magic header: 0xEB
             buf.put((byte) 0xEB);
-            buf.put((byte) 0xAD);
+
+            // Differentiate Beacon vs SOS/Relay using the second magic byte
+            if (SOSMessage.TYPE_BEACON.equals(type)) {
+                buf.put((byte) 0xBE); // 0xBE for Beacon
+            } else {
+                buf.put((byte) 0xAD); // 0xAD for Alert Data
+            }
 
             // Message ID: first 4 chars as bytes
-            byte[] idBytes = msgId.substring(
-                            0, Math.min(4, msgId.length()))
-                    .getBytes(
-                            java.nio.charset.StandardCharsets.UTF_8);
+            byte[] idBytes = msgId.substring(0, Math.min(4, msgId.length()))
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
             buf.put(Arrays.copyOf(idBytes, 4));
 
             // Device ID: first 4 chars
-            byte[] devBytes = devId.substring(
-                            0, Math.min(4, devId.length()))
-                    .getBytes(
-                            java.nio.charset.StandardCharsets.UTF_8);
+            byte[] devBytes = devId.substring(0, Math.min(4, devId.length()))
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
             buf.put(Arrays.copyOf(devBytes, 4));
 
             // Lat as float (4 bytes)
@@ -221,19 +195,21 @@ public class BleAdvertiser {
             buf.put((byte) hops);
 
             byte[] result = buf.array();
-            Log.d(TAG, "Built advert payload: "
-                    + result.length + " bytes");
-            return result;
+            Log.d(TAG, "Built advert payload: " + result.length + " bytes");
 
+            return result;
         } catch (Exception e) {
-            Log.e(TAG, "buildAdvertPayload failed: "
-                    + e.getMessage());
+            Log.e(TAG, "buildAdvertPayload failed: " + e.getMessage());
             // Fallback: return first 20 bytes
-            return Arrays.copyOf(fullPayload,
-                    Math.min(20, fullPayload.length));
+            return Arrays.copyOf(fullPayload, Math.min(20, fullPayload.length));
         }
     }
 
-    public boolean isAdvertising() { return isAdvertising; }
-    public byte[] getLastPayload() { return lastPayload; }
+    public boolean isAdvertising() {
+        return isAdvertising;
+    }
+
+    public byte[] getLastPayload() {
+        return lastPayload;
+    }
 }

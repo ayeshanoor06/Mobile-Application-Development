@@ -19,7 +19,6 @@ public class GattClient {
 
     private static final String TAG = "GattClient";
 
-    // How long to wait before retrying a failed read (ms)
     private static final long RETRY_DELAY_MS = 3000;
 
     public interface ReadCallback {

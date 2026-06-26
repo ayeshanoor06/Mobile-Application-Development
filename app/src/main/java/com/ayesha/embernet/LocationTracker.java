@@ -182,7 +182,7 @@ public class LocationTracker {
                     3000, 0f, gpsListener,
                     Looper.getMainLooper());
 
-            // Also try network provider if available
+
             if (locationManager.isProviderEnabled(
                     LocationManager.NETWORK_PROVIDER)) {
                 locationManager.requestLocationUpdates(

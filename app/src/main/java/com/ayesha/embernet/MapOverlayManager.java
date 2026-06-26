@@ -171,6 +171,15 @@ public class MapOverlayManager {
         zones.add(new SafeZone(
                 "Layyah Chowk",
                 "Shelter", 30.9620, 70.9390, 500));
+        zones.add(new SafeZone(
+                "DHQ Hopital Layyah",
+                "Hospital", 30.9741, 70.9575, 500));
+
+        zones.add(new SafeZone(
+                "Sirati Hopital pvt ltd Layyah",
+                "Hospital", 30.9585, 70.9602, 100));
+
+
 
         return zones;
     }

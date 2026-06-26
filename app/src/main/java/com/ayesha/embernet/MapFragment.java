@@ -20,30 +20,30 @@ import com.google.android.material.button.MaterialButton;
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory;
 import org.osmdroid.util.GeoPoint;
 import org.osmdroid.views.MapView;
-import org.osmdroid.views.overlay.TilesOverlay;
 
-public class MapFragment extends Fragment implements LocationTracker.LocationListener {
+public class MapFragment extends Fragment
+        implements LocationTracker.LocationListener {
 
-    private MapView          mapView;
-    private LocationTracker  locationTracker;
-    private MapOverlayManager overlayManager;
-    private TextView         coordsText;
-    private TextView         statusText;
-    private View             statusDot;
-    private boolean          mapCenteredOnUser = false;
+    private MapView             mapView;
+    private LocationTracker     locationTracker;
+    private MapOverlayManager   overlayManager;
+    private OfflineMapManager   offlineMapManager;
+    private TextView            coordsText;
+    private TextView            statusText;
+    private View                statusDot;
+    private MaterialButton      btnDownloadMap;
+    private boolean             mapCenteredOnUser = false;
 
-    // Default center — layyah
     private static final double DEFAULT_LAT  = 30.9625;
     private static final double DEFAULT_LON  = 70.9394;
-    private static final double DEFAULT_ZOOM = 16.0;
-
+    private static final double DEFAULT_ZOOM = 17.0;
     @Nullable
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater,
                              @Nullable ViewGroup container,
                              @Nullable Bundle savedInstanceState) {
-        return inflater.inflate(R.layout.fragment_map, container, false);
-
+        return inflater.inflate(
+                R.layout.fragment_map, container, false);
     }
 
     @Override
@@ -51,132 +51,119 @@ public class MapFragment extends Fragment implements LocationTracker.LocationLis
                               @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
-        mapView    = view.findViewById(R.id.map_view);
-        coordsText = view.findViewById(R.id.map_coords_text);
-        statusText = view.findViewById(R.id.map_status_text);
-        statusDot  = view.findViewById(R.id.map_status_dot);
+        mapView       = view.findViewById(R.id.map_view);
+        coordsText    = view.findViewById(R.id.map_coords_text);
+        statusText    = view.findViewById(R.id.map_status_text);
+        statusDot     = view.findViewById(R.id.map_status_dot);
+        btnDownloadMap = view.findViewById(R.id.btn_download_map);
+
+        offlineMapManager =
+                new OfflineMapManager(requireContext());
 
         setupMap();
 
-        overlayManager  = new MapOverlayManager(requireContext(), mapView);
-        locationTracker = new LocationTracker(requireContext());
+        overlayManager =
+                new MapOverlayManager(requireContext(), mapView);
+        locationTracker =
+                new LocationTracker(requireContext());
         locationTracker.setListener(this);
 
         overlayManager.addSafeZones();
-        setupMarkerListeners();   // ← add this line
+        setupMarkerListeners();
         setupButtons(view);
     }
 
-    private void setupMap() {
-        // Change tile source to one that shows
-        // buildings, shops, hospitals, roads,
-        // landmarks — everything like Google Maps
-        mapView.setTileSource(TileSourceFactory.MAPNIK);
+    // ── Map setup ─────────────────────────────────────────────────────────
 
+    private void setupMap() {
+        mapView.setTileSource(TileSourceFactory.MAPNIK);
         mapView.setMultiTouchControls(true);
         mapView.getZoomController().setVisibility(
                 org.osmdroid.views.CustomZoomButtonsController
                         .Visibility.NEVER);
-
-        // Zoom 16 shows street names, shops,
-        // buildings, mosques, schools, everything
-        mapView.getController().setZoom(16.0);
+        mapView.getController().setZoom(DEFAULT_ZOOM);
         mapView.getController().setCenter(
                 new GeoPoint(DEFAULT_LAT, DEFAULT_LON));
-
-        // REMOVE this line completely — it hides details
-        // mapView.getOverlayManager()
-        //     .getTilesOverlay()
-        //     .setColorFilter(TilesOverlay.INVERT_COLORS);
-
+        // NO color filter — shows map in natural colors
         mapView.setTilesScaledToDpi(true);
         mapView.setUseDataConnection(true);
     }
 
+    // ── Buttons ───────────────────────────────────────────────────────────
+
     private void setupButtons(@NonNull View view) {
-        MaterialButton btnLocation = view.findViewById(R.id.btn_my_location);
-        btnLocation.setOnClickListener(v -> {
-            Location loc = locationTracker.getLastKnownLocation();
-            if (loc != null) {
-                mapView.getController().animateTo(
-                        new GeoPoint(loc.getLatitude(), loc.getLongitude())
-                );
-                mapView.getController().setZoom(17.0);
-            } else {
-                Toast.makeText(requireContext(),
-                        "GPS not locked yet", Toast.LENGTH_SHORT).show();
-            }
-        });
 
-        MaterialButton btnDownload = view.findViewById(R.id.btn_download_map);
-        btnDownload.setOnClickListener(v -> downloadOfflineMap());
-    }
+        // My location button
+        MaterialButton btnLocation =
+                view.findViewById(R.id.btn_my_location);
+        if (btnLocation != null) {
+            btnLocation.setOnClickListener(v -> {
+                Location loc =
+                        locationTracker.getLastKnownLocation();
+                if (loc != null) {
+                    mapView.getController().animateTo(
+                            new GeoPoint(
+                                    loc.getLatitude(),
+                                    loc.getLongitude()));
+                    mapView.getController().setZoom(17.0);
+                } else {
+                    Toast.makeText(requireContext(),
+                            "GPS not locked yet",
+                            Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
 
-
-
-    private void setupMarkerListeners() {
-        // Safe zone marker tapped → show bottom sheet
-        overlayManager.setOnSafeZoneTapped(zone -> {
-            Location userLoc = locationTracker.getLastKnownLocation();
-            SafeZoneBottomSheet sheet =
-                    SafeZoneBottomSheet.newInstance(zone, userLoc);
-            sheet.show(getChildFragmentManager(), "safe_zone");
-        });
-    }
-
-    // Call this from Phase 4 MeshService when an SOS arrives
-    public void showSosAlertOnMap(double lat, double lon,
-                                  int battery, int hops, String time, String deviceId) {
-
-        if (!isAdded() || mapView == null) return;
-
-        requireActivity().runOnUiThread(() -> {
-            overlayManager.addSosAlertMarker(
-                    lat, lon, deviceId, hops, battery, time);
-
-            SosAlertBottomSheet sheet = SosAlertBottomSheet.newInstance(
-                    lat, lon, battery, hops, time, deviceId);
-            sheet.show(getChildFragmentManager(), "sos_alert");
-        });
-    }
-    // ── LocationTracker.LocationListener callbacks ────────────────────────
-
-    @Override
-    public void onLocationUpdated(Location location) {
-        // Update coordinates text
-        coordsText.setText(LocationTracker.formatCoords(location));
-        statusText.setText("GPS locked");
-
-        // Change dot to green once we have a fix
-        statusDot.setBackgroundResource(R.drawable.circle_dot);
-
-        // Move marker on map
-        overlayManager.updateUserLocation(location);
-
-        // First fix — animate map to user's real position
-        if (!mapCenteredOnUser) {
-            mapView.getController().animateTo(
-                    new GeoPoint(location.getLatitude(), location.getLongitude())
-            );
-            mapView.getController().setZoom(18.0);
-            mapCenteredOnUser = true;
+        // Download map button — FIX 1
+        if (btnDownloadMap != null) {
+            btnDownloadMap.setOnClickListener(v ->
+                    downloadOfflineMap());
         }
     }
 
-    @Override
-    public void onLocationUnavailable() {
-        coordsText.setText("Location unavailable");
-        statusText.setText("No GPS");
+    // ── Marker listeners ──────────────────────────────────────────────────
+
+    private void setupMarkerListeners() {
+        overlayManager.setOnSafeZoneTapped(zone -> {
+            Location userLoc =
+                    locationTracker.getLastKnownLocation();
+            SafeZoneBottomSheet sheet =
+                    SafeZoneBottomSheet.newInstance(
+                            zone, userLoc);
+            sheet.show(getChildFragmentManager(),
+                    "safe_zone");
+        });
     }
 
-    // ── Download offline map ──────────────────────────────────────────────
+    // ── SOS pin on map ────────────────────────────────────────────────────
+
+    public void showSosAlertOnMap(double lat, double lon,
+                                  int battery, int hops,
+                                  String time, String deviceId) {
+        if (!isAdded() || mapView == null) return;
+        requireActivity().runOnUiThread(() -> {
+            overlayManager.addSosAlertMarker(
+                    lat, lon, deviceId, hops, battery, time);
+            SosAlertBottomSheet sheet =
+                    SosAlertBottomSheet.newInstance(
+                            lat, lon, battery, hops,
+                            time, deviceId);
+            sheet.show(getChildFragmentManager(),
+                    "sos_alert");
+        });
+    }
+
+    // ── Download offline map — FIXED ──────────────────────────────────────
 
     private void downloadOfflineMap() {
+        // Check internet connection
         android.net.ConnectivityManager cm =
-                (android.net.ConnectivityManager) requireContext()
-                        .getSystemService(android.content.Context.CONNECTIVITY_SERVICE);
-        android.net.NetworkInfo netInfo = cm.getActiveNetworkInfo();
-
+                (android.net.ConnectivityManager)
+                        requireContext().getSystemService(
+                                android.content.Context
+                                        .CONNECTIVITY_SERVICE);
+        android.net.NetworkInfo netInfo =
+                cm.getActiveNetworkInfo();
         if (netInfo == null || !netInfo.isConnected()) {
             Toast.makeText(requireContext(),
                     "No internet. Connect to Wi-Fi first.",
@@ -184,47 +171,159 @@ public class MapFragment extends Fragment implements LocationTracker.LocationLis
             return;
         }
 
-        GeoPoint center = (GeoPoint) mapView.getMapCenter();
-        OfflineMapManager manager = new OfflineMapManager(requireContext());
-
-        if (manager.isMapSaved()) {
-            new com.google.android.material.dialog.MaterialAlertDialogBuilder(
+        if (offlineMapManager.isMapSaved()) {
+            // Ask user if they want to re-download
+            new com.google.android.material.dialog
+                    .MaterialAlertDialogBuilder(
                     requireContext())
-                    .setTitle("Re-download map?")
-                    .setMessage("An offline map is already saved. Download a fresh copy?")
+                    .setTitle("Map already saved")
+                    .setMessage(
+                            "You already have an offline map. "
+                                    + "Download again to refresh?")
                     .setPositiveButton("Re-download",
-                            (d, w) -> startDownload(center))
-                    .setNegativeButton("Keep existing", null)
+                            (d, w) -> startDownload())
+                    .setNegativeButton("Keep existing",
+                            null)
                     .show();
         } else {
-            startDownload(center);
+            startDownload();
         }
     }
 
-    private void startDownload(GeoPoint center) {
-        MaterialButton btnDownload =
-                requireView().findViewById(R.id.btn_download_map);
-        btnDownload.setEnabled(false);
-        btnDownload.setText("Downloading…");
+    private void startDownload() {
+        GeoPoint center =
+                (GeoPoint) mapView.getMapCenter();
 
-        new DownloadMapDialog(requireContext(), center,
-                new DownloadMapDialog.OnDownloadComplete() {
+        // Disable button during download
+        if (btnDownloadMap != null) {
+            btnDownloadMap.setEnabled(false);
+            btnDownloadMap.setText("Downloading…");
+        }
+
+        // Clear old partial download so it
+        // always starts fresh — fixes instant toast bug
+        offlineMapManager.clearOfflineMap();
+
+        // Show progress dialog
+        android.app.ProgressDialog progress =
+                new android.app.ProgressDialog(
+                        requireContext());
+        progress.setTitle("Downloading offline map");
+        progress.setMessage(
+                "Stay on Wi-Fi. About 1 minute...");
+        progress.setProgressStyle(
+                android.app.ProgressDialog
+                        .STYLE_HORIZONTAL);
+        progress.setMax(100);
+        progress.setProgress(0);
+        progress.setCancelable(false);
+        progress.setButton(
+                android.app.ProgressDialog.BUTTON_NEGATIVE,
+                "Cancel",
+                (d, w) -> {
+                    offlineMapManager.cancelDownload();
+                    if (btnDownloadMap != null) {
+                        btnDownloadMap.setEnabled(true);
+                        btnDownloadMap.setText(
+                                getString(R.string.download_map));
+                    }
+                });
+        progress.show();
+
+        android.util.Log.d("MapFragment",
+                "Download started — center: "
+                        + center.getLatitude()
+                        + ", " + center.getLongitude());
+
+        offlineMapManager.downloadArea(center,
+                new OfflineMapManager.DownloadCallback() {
+
                     @Override
-                    public void onComplete() {
-                        btnDownload.setEnabled(true);
-                        btnDownload.setText(R.string.map_saved);
-                        statusText.setText("Offline map saved");
-                        Toast.makeText(requireContext(),
-                                "Map saved! Works offline now.",
-                                Toast.LENGTH_LONG).show();
+                    public void onProgress(int percent,
+                                           long done,
+                                           long total) {
+                        if (!isAdded()) return;
+                        requireActivity().runOnUiThread(() -> {
+                            progress.setProgress(percent);
+                            progress.setMessage(
+                                    done + " / " + total
+                                            + " tiles  ("
+                                            + percent + "%)");
+                        });
                     }
 
                     @Override
-                    public void onCancelled() {
-                        btnDownload.setEnabled(true);
-                        btnDownload.setText(R.string.download_map);
+                    public void onComplete(long totalTiles) {
+                        if (!isAdded()) return;
+                        requireActivity().runOnUiThread(() -> {
+                            progress.dismiss();
+                            Toast.makeText(requireContext(),
+                                    "Map downloaded — "
+                                            + totalTiles
+                                            + " tiles saved",
+                                    Toast.LENGTH_LONG).show();
+                            if (btnDownloadMap != null) {
+                                btnDownloadMap.setText(
+                                        "Map downloaded ✓");
+                                btnDownloadMap.setEnabled(
+                                        false);
+                            }
+                            if (statusText != null) {
+                                statusText.setText(
+                                        "Offline map saved");
+                            }
+                        });
                     }
-                }).show();
+
+                    @Override
+                    public void onError(String message) {
+                        if (!isAdded()) return;
+                        requireActivity().runOnUiThread(() -> {
+                            progress.dismiss();
+                            if (btnDownloadMap != null) {
+                                btnDownloadMap.setEnabled(
+                                        true);
+                                btnDownloadMap.setText(
+                                        getString(
+                                                R.string.download_map));
+                            }
+                            if (!"Cancelled".equals(message)) {
+                                Toast.makeText(requireContext(),
+                                        "Download failed: "
+                                                + message,
+                                        Toast.LENGTH_LONG).show();
+                            }
+                        });
+                    }
+                });
+    }
+
+    // ── LocationTracker.LocationListener ──────────────────────────────────
+
+    @Override
+    public void onLocationUpdated(Location location) {
+        if (!isAdded()) return;
+        coordsText.setText(
+                LocationTracker.formatCoords(location));
+        statusText.setText("GPS locked");
+        statusDot.setBackgroundResource(
+                R.drawable.circle_dot);
+        overlayManager.updateUserLocation(location);
+        if (!mapCenteredOnUser) {
+            mapView.getController().animateTo(
+                    new GeoPoint(
+                            location.getLatitude(),
+                            location.getLongitude()));
+            mapView.getController().setZoom(18.0);
+            mapCenteredOnUser = true;
+        }
+    }
+
+    @Override
+    public void onLocationUnavailable() {
+        if (!isAdded()) return;
+        coordsText.setText("Location unavailable");
+        statusText.setText("No GPS");
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
@@ -246,9 +345,10 @@ public class MapFragment extends Fragment implements LocationTracker.LocationLis
     @Override
     public void onDestroyView() {
         super.onDestroyView();
-        if (overlayManager != null) overlayManager.stopAnimations();
+        if (overlayManager != null) {
+            overlayManager.stopAnimations();
+        }
         locationTracker.stopTracking();
         mapView.onDetach();
     }
-
 }

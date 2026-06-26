@@ -14,19 +14,24 @@ import android.os.IBinder;
 import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
+import androidx.localbroadcastmanager.content
+        .LocalBroadcastManager;
 
 public class SosForegroundService extends Service
         implements BroadcastEngine.BroadcastListener {
 
-    private static final String TAG        = "SosForegroundService";
-    private static final String CHANNEL_ID = "embernet_sos";
+    private static final String TAG        =
+            "SosForegroundService";
+    private static final String CHANNEL_ID =
+            "embernet_sos";
     private static final int    NOTIF_ID   = 1001;
 
-    public static final String ACTION_START = "START_SOS";
-    public static final String ACTION_STOP  = "STOP_SOS";
-
-    // Local broadcast action — stays inside the app
-    // does NOT create a new activity or task
+    public static final String ACTION_START =
+            "START_SOS";
+    public static final String ACTION_STOP  =
+            "STOP_SOS";
+    public static final String ACTION_ENABLE_RECEIVING =
+            "ENABLE_RECEIVING";
     public static final String ACTION_SHOW_ALERT_LOCAL =
             "com.ayesha.embernet.LOCAL_ALERT";
 
@@ -41,15 +46,18 @@ public class SosForegroundService extends Service
     private BroadcastEngine engine;
     private ServiceCallback uiCallback;
 
-    // Tracks which messageIds we have already
-    // shown alerts for
+    // KEY FIX: starts as FALSE
+    // Only becomes true when user explicitly taps
+    // "Start mesh receiver" or "SOS button"
+    // Resets to false when service is destroyed
+    private boolean isReceivingEnabled = false;
+
     private final java.util.Set<String> shownAlerts =
             new java.util.HashSet<>();
 
     public interface ServiceCallback {
-        void onBroadcastTick(SOSMessage message,
-                             int count);
-        void onRelayReceived(SOSMessage message);
+        void onBroadcastTick(SOSMessage msg, int count);
+        void onRelayReceived(SOSMessage msg);
         void onGpsLocked(Location location);
     }
 
@@ -57,7 +65,7 @@ public class SosForegroundService extends Service
         this.uiCallback = cb;
     }
 
-    // ── Lifecycle
+    // ── Lifecycle ─────────────────────────────────────────────────────
 
     @Override
     public void onCreate() {
@@ -65,33 +73,41 @@ public class SosForegroundService extends Service
         createNotificationChannel();
         engine = new BroadcastEngine(this);
         engine.setListener(this);
-
         engine.getRelayEngine().setMeshService(
                 MeshService.getInstance(this));
 
+        // Wire MeshService listener
+        // isReceivingEnabled = false so NO alerts
+        // until user explicitly enables
         MeshService.getInstance(this).setListener(
                 new MeshService.MeshListener() {
                     @Override
                     public void onPacketReceived(
                             byte[] payload) {
-                        Log.d(TAG, "Packet — "
+                        if (!isReceivingEnabled) {
+                            Log.d(TAG,
+                                    "Packet ignored — "
+                                            + "receiving not enabled");
+                            return;
+                        }
+                        Log.d(TAG, "Packet received "
                                 + payload.length + "b");
                         engine.getRelayEngine()
                                 .handleIncomingPacket(payload);
                     }
                     @Override
                     public void onPeerCountChanged(
-                            int count) {}
+                            int c) {}
                     @Override
                     public void onAdvertiseStarted() {}
                     @Override
-                    public void onAdvertiseFailed(
-                            int code) {
-                        Log.e(TAG, "BLE failed: " + code);
+                    public void onAdvertiseFailed(int c) {
+                        Log.e(TAG, "BLE failed: " + c);
                     }
                 });
 
-        Log.d(TAG, "Service created");
+        Log.d(TAG, "Service created. "
+                + "isReceivingEnabled=false");
     }
 
     @Override
@@ -99,38 +115,62 @@ public class SosForegroundService extends Service
                               int flags,
                               int startId) {
         if (intent == null) return START_STICKY;
-
         String action = intent.getAction();
+        if (action == null) action = "";
 
-        if (ACTION_START.equals(action)) {
-            Notification n = buildNotification(
-                    "Broadcasting SOS...",
-                    "Sending your location to nearby devices");
+        switch (action) {
 
-            if (Build.VERSION.SDK_INT
-                    >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIF_ID, n,
-                        android.content.pm.ServiceInfo
-                                .FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-                                | android.content.pm.ServiceInfo
-                                .FOREGROUND_SERVICE_TYPE_LOCATION);
-            } else {
-                startForeground(NOTIF_ID, n);
-            }
+            case ACTION_START:
+                // User pressed SOS button
+                // Enable receiving immediately
+                isReceivingEnabled = true;
+                shownAlerts.clear();
+                Log.d(TAG,
+                        "SOS START — receiving ENABLED");
 
-            shownAlerts.clear();
-            engine.startSOS();
-            Log.d(TAG, "SOS started");
+                Notification n = buildNotification(
+                        "Broadcasting SOS...",
+                        "Sending location to nearby devices");
 
-        } else if (ACTION_STOP.equals(action)) {
-            engine.stopSOS();
-            shownAlerts.clear();
-            stopForeground(true);
-            stopSelf();
-            Log.d(TAG, "SOS stopped");
+                if (Build.VERSION.SDK_INT
+                        >= Build.VERSION_CODES.Q) {
+                    startForeground(NOTIF_ID, n,
+                            android.content.pm.ServiceInfo
+                                    .FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                                    | android.content.pm.ServiceInfo
+                                    .FOREGROUND_SERVICE_TYPE_LOCATION);
+                } else {
+                    startForeground(NOTIF_ID, n);
+                }
+                engine.startSOS();
+                break;
 
-        } else {
-            Log.d(TAG, "Service kept alive");
+            case ACTION_STOP:
+                // User pressed Stop SOS
+                // CRITICAL: do NOT disable receiving
+                // Mesh should still receive alerts
+                // after SOS stops
+                // Only stop broadcasting
+                engine.stopSOS();
+                shownAlerts.clear();
+                stopForeground(true);
+                Log.d(TAG,
+                        "SOS STOP — receiving stays: "
+                                + isReceivingEnabled);
+                break;
+
+            case ACTION_ENABLE_RECEIVING:
+                // User tapped Start Mesh Receiver
+                isReceivingEnabled = true;
+                shownAlerts.clear();
+                Log.d(TAG,
+                        "Receiving ENABLED by user");
+                break;
+
+            default:
+                Log.d(TAG, "Service alive. "
+                        + "receiving=" + isReceivingEnabled);
+                break;
         }
 
         return START_STICKY;
@@ -145,134 +185,144 @@ public class SosForegroundService extends Service
     public void onDestroy() {
         super.onDestroy();
         if (engine != null) engine.stopSOS();
+        // Reset on destroy
+        isReceivingEnabled = false;
+        Log.d(TAG, "Service destroyed");
     }
 
-    // ── BroadcastEngine.BroadcastListener
+    // ── BroadcastEngine.BroadcastListener ────────────────────────────
 
     @Override
-    public void onSosBroadcast(SOSMessage message,
-                               int broadcastNumber) {
+    public void onSosBroadcast(SOSMessage msg,
+                               int count) {
         updateNotification(
-                "SOS Broadcasting — #" + broadcastNumber,
-                "Location: "
-                        + message.getFormattedCoords());
-        if (uiCallback != null) {
-            uiCallback.onBroadcastTick(
-                    message, broadcastNumber);
-        }
+                "SOS Broadcasting — #" + count,
+                "Location: " + msg.getFormattedCoords());
+        if (uiCallback != null)
+            uiCallback.onBroadcastTick(msg, count);
     }
 
     @Override
-    public void onRelayReceived(SOSMessage message) {
+    public void onRelayReceived(SOSMessage msg) {
         Log.d(TAG, "onRelayReceived: "
-                + message.deviceId
-                + " hops=" + message.hopCount);
+                + msg.deviceId
+                + " receiving=" + isReceivingEnabled);
 
-        // Show exactly once per messageId
-        if (shownAlerts.contains(message.messageId)) {
-            Log.d(TAG, "Already shown — skipping "
-                    + message.messageId);
+        if (!isReceivingEnabled) {
+            Log.d(TAG, "Alert blocked — not enabled");
             return;
         }
-        shownAlerts.add(message.messageId);
 
-        // Show system notification
-        showAlertNotification(message);
-
-        // Notify bound UI (SosFragment)
-        if (uiCallback != null) {
-            uiCallback.onRelayReceived(message);
+        // Show each message only once
+        if (shownAlerts.contains(msg.messageId)) {
+            Log.d(TAG, "Already shown — skip");
+            return;
         }
+        shownAlerts.add(msg.messageId);
 
-        // ── KEY FIX
-        Intent localIntent = new Intent(
+        showAlertNotification(msg);
+
+        if (uiCallback != null)
+            uiCallback.onRelayReceived(msg);
+
+        // Send via LocalBroadcast to existing
+        // MainActivity — does NOT create new activity
+        Intent local = new Intent(
                 ACTION_SHOW_ALERT_LOCAL);
-        localIntent.putExtra(
-                "message_json", message.toJson());
-
-        // Send to existing MainActivity directly
-        // No new task, no new instance
-        androidx.localbroadcastmanager.content
-                .LocalBroadcastManager
+        local.putExtra("message_json", msg.toJson());
+        LocalBroadcastManager
                 .getInstance(this)
-                .sendBroadcast(localIntent);
+                .sendBroadcast(local);
 
-        Log.d(TAG, "LocalBroadcast sent for "
-                + message.messageId);
+        Log.d(TAG, "Alert sent for " + msg.messageId);
     }
 
     @Override
     public void onGpsLocked(Location location) {
-        if (uiCallback != null) {
+        if (uiCallback != null)
             uiCallback.onGpsLocked(location);
-        }
     }
 
     @Override
     public void onBroadcastStopped() {
         stopForeground(true);
-        stopSelf();
+        // Do NOT stopSelf here — keep service alive
+        // so mesh can still receive alerts
+        Log.d(TAG, "Broadcast stopped — "
+                + "service kept alive for receiving");
     }
 
-    // ── Static helpers
+    // ── Static helpers ────────────────────────────────────────────────
 
-    public static void start(Context context) {
-        Intent intent = new Intent(context,
+    public static void start(Context ctx) {
+        Intent i = new Intent(ctx,
                 SosForegroundService.class);
-        intent.setAction(ACTION_START);
-        context.startForegroundService(intent);
+        i.setAction(ACTION_START);
+        ctx.startForegroundService(i);
     }
 
-    public static void stop(Context context) {
-        Intent intent = new Intent(context,
+    public static void stop(Context ctx) {
+        Intent i = new Intent(ctx,
                 SosForegroundService.class);
-        intent.setAction(ACTION_STOP);
-        context.startService(intent);
+        i.setAction(ACTION_STOP);
+        ctx.startService(i);
     }
 
-    // ── Notifications
+    public static void enableReceiving(Context ctx) {
+        Intent i = new Intent(ctx,
+                SosForegroundService.class);
+        i.setAction(ACTION_ENABLE_RECEIVING);
+        ctx.startService(i);
+    }
+
+    public boolean isReceivingEnabled() {
+        return isReceivingEnabled;
+    }
+
+    public boolean isBroadcasting() {
+        return engine != null
+                && engine.isBroadcasting();
+    }
+
+    public BroadcastEngine getEngine() {
+        return engine;
+    }
+
+    // ── Notifications ─────────────────────────────────────────────────
 
     private void createNotificationChannel() {
-        NotificationChannel channel =
+        NotificationChannel ch =
                 new NotificationChannel(
                         CHANNEL_ID,
                         "EmberNet SOS",
                         NotificationManager.IMPORTANCE_HIGH);
-        channel.setDescription("Active SOS broadcast");
-        channel.setShowBadge(true);
-        channel.enableVibration(true);
-        channel.enableLights(true);
-        channel.setLightColor(
+        ch.setDescription("Active SOS broadcast");
+        ch.enableVibration(true);
+        ch.enableLights(true);
+        ch.setLightColor(
                 android.graphics.Color
                         .parseColor("#E8521A"));
-        channel.setLockscreenVisibility(
-                android.app.Notification.VISIBILITY_PUBLIC);
+        ch.setLockscreenVisibility(
+                Notification.VISIBILITY_PUBLIC);
         getSystemService(NotificationManager.class)
-                .createNotificationChannel(channel);
+                .createNotificationChannel(ch);
     }
 
-    private void showAlertNotification(
-            SOSMessage message) {
-        String alertChannelId = "embernet_alert";
-        NotificationChannel alertChannel =
-                new NotificationChannel(
-                        alertChannelId,
+    private void showAlertNotification(SOSMessage m) {
+        String cid = "embernet_alert";
+        NotificationChannel ac =
+                new NotificationChannel(cid,
                         "EmberNet SOS Alerts",
                         NotificationManager.IMPORTANCE_MAX);
-        alertChannel.enableVibration(true);
-        alertChannel.enableLights(true);
-        alertChannel.setLightColor(
-                android.graphics.Color
-                        .parseColor("#E8521A"));
-        alertChannel.setLockscreenVisibility(
-                android.app.Notification.VISIBILITY_PUBLIC);
-        alertChannel.setBypassDnd(true);
+        ac.enableVibration(true);
+        ac.setBypassDnd(true);
+        ac.setLockscreenVisibility(
+                Notification.VISIBILITY_PUBLIC);
         getSystemService(NotificationManager.class)
-                .createNotificationChannel(alertChannel);
+                .createNotificationChannel(ac);
 
-        PendingIntent openSos =
-                PendingIntent.getActivity(
-                        this, 2,
+        PendingIntent open =
+                PendingIntent.getActivity(this, 2,
                         new Intent(this, MainActivity.class)
                                 .putExtra("open_sos", true)
                                 .addFlags(
@@ -281,24 +331,21 @@ public class SosForegroundService extends Service
                         PendingIntent.FLAG_UPDATE_CURRENT
                                 | PendingIntent.FLAG_IMMUTABLE);
 
-        android.app.Notification alert =
-                new NotificationCompat
-                        .Builder(this, alertChannelId)
+        Notification alert =
+                new NotificationCompat.Builder(this, cid)
                         .setContentTitle(
-                                "SOS — Device " + message.deviceId)
+                                "SOS — Device " + m.deviceId)
                         .setContentText(
-                                "Location: "
-                                        + message.getFormattedCoords()
-                                        + " Battery: "
-                                        + message.battery + "%")
+                                "Location: " + m.getFormattedCoords()
+                                        + " Battery: " + m.battery + "%")
                         .setSmallIcon(R.drawable.ic_sos)
                         .setColor(getColor(R.color.ember))
-                        .setContentIntent(openSos)
+                        .setContentIntent(open)
                         .setAutoCancel(true)
                         .setPriority(
                                 NotificationCompat.PRIORITY_MAX)
-                        .setVibrate(new long[]{
-                                0, 300, 200, 300, 200, 600})
+                        .setVibrate(
+                                new long[]{0,300,200,300,200,600})
                         .setDefaults(
                                 NotificationCompat.DEFAULT_ALL)
                         .setVisibility(
@@ -311,9 +358,8 @@ public class SosForegroundService extends Service
 
     private Notification buildNotification(
             String title, String text) {
-        PendingIntent openApp =
-                PendingIntent.getActivity(
-                        this, 0,
+        PendingIntent open =
+                PendingIntent.getActivity(this, 0,
                         new Intent(this, MainActivity.class)
                                 .putExtra("open_sos", true)
                                 .addFlags(
@@ -322,9 +368,8 @@ public class SosForegroundService extends Service
                         PendingIntent.FLAG_UPDATE_CURRENT
                                 | PendingIntent.FLAG_IMMUTABLE);
 
-        PendingIntent stopIntent =
-                PendingIntent.getService(
-                        this, 1,
+        PendingIntent stop =
+                PendingIntent.getService(this, 1,
                         new Intent(this,
                                 SosForegroundService.class)
                                 .setAction(ACTION_STOP),
@@ -337,9 +382,9 @@ public class SosForegroundService extends Service
                 .setContentText(text)
                 .setSmallIcon(R.drawable.ic_sos)
                 .setColor(getColor(R.color.ember))
-                .setContentIntent(openApp)
+                .setContentIntent(open)
                 .addAction(R.drawable.ic_sos,
-                        "Stop SOS", stopIntent)
+                        "Stop SOS", stop)
                 .setOngoing(true)
                 .setPriority(
                         NotificationCompat.PRIORITY_HIGH)
@@ -351,14 +396,5 @@ public class SosForegroundService extends Service
         getSystemService(NotificationManager.class)
                 .notify(NOTIF_ID,
                         buildNotification(title, text));
-    }
-
-    public boolean isBroadcasting() {
-        return engine != null
-                && engine.isBroadcasting();
-    }
-
-    public BroadcastEngine getEngine() {
-        return engine;
     }
 }
