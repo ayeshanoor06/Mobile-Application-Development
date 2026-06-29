@@ -1,6 +1,5 @@
 package com.ayesha.embernet;
 
-import android.Manifest;
 import android.app.Application;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothManager;
@@ -12,7 +11,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
-import androidx.annotation.RequiresPermission;
 import androidx.preference.PreferenceManager;
 
 import org.osmdroid.config.Configuration;
@@ -52,7 +50,9 @@ public class EmberNetApp extends Application {
         BluetoothAdapter adapter = bm.getAdapter();
 
         if (adapter != null && adapter.isEnabled()) {
-
+            // BT already on — try immediately,
+            // then retry at 3s and 6s in case
+            // the BT stack is not fully ready yet
             new Handler(Looper.getMainLooper())
                     .postDelayed(this::doStartMesh, 1000);
             new Handler(Looper.getMainLooper())
@@ -66,7 +66,6 @@ public class EmberNetApp extends Application {
         }
     }
 
-    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     private void doStartMesh() {
         if (MeshService.getInstance(
                 getApplicationContext()).isActive()) {
@@ -83,7 +82,9 @@ public class EmberNetApp extends Application {
             if (adapter == null
                     || !adapter.isEnabled()) return;
 
-
+            // Use BEACON type — not SOS type
+            // This prevents Phone B from showing an alert
+            // just because Phone A started its mesh
             SOSMessage beacon =
                     SOSMessage.buildBeacon(
                             getApplicationContext());
@@ -105,7 +106,6 @@ public class EmberNetApp extends Application {
     private void registerBluetoothStateReceiver() {
         BroadcastReceiver receiver =
                 new BroadcastReceiver() {
-                    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
                     @Override
                     public void onReceive(
                             Context ctx, Intent intent) {
@@ -135,3 +135,4 @@ public class EmberNetApp extends Application {
                         BluetoothAdapter.ACTION_STATE_CHANGED));
     }
 }
+

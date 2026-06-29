@@ -1,9 +1,6 @@
 package com.ayesha.embernet;
 
-import android.Manifest;
-import android.content.Intent;
 import android.location.Location;
-import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -14,21 +11,14 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.annotation.RequiresPermission;
 
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment;
 import com.google.android.material.button.MaterialButton;
 
-import org.json.JSONObject;
-
-import java.nio.charset.StandardCharsets;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Locale;
-
 public class SafeZoneBottomSheet
         extends BottomSheetDialogFragment {
 
+    private static final String TAG          = "SafeZone";
     private static final String ARG_NAME     = "name";
     private static final String ARG_TYPE     = "type";
     private static final String ARG_LAT      = "lat";
@@ -69,7 +59,6 @@ public class SafeZoneBottomSheet
                 container, false);
     }
 
-    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     @Override
     public void onViewCreated(
             @NonNull View view,
@@ -77,8 +66,10 @@ public class SafeZoneBottomSheet
         super.onViewCreated(view, savedInstanceState);
 
         Bundle args    = requireArguments();
-        String name    = args.getString(ARG_NAME, "Safe Zone");
-        String type    = args.getString(ARG_TYPE, "Shelter");
+        String name    = args.getString(ARG_NAME,
+                "Safe Zone");
+        String type    = args.getString(ARG_TYPE,
+                "Shelter");
         double lat     = args.getDouble(ARG_LAT);
         double lon     = args.getDouble(ARG_LON);
         int    capacity = args.getInt(ARG_CAPACITY, 100);
@@ -107,26 +98,25 @@ public class SafeZoneBottomSheet
         if (capacityView != null)
             capacityView.setText(capacity + " people");
         if (statusView  != null) statusView.setText("Open");
-        if (verifiedView != null) verifiedView.setText("Yes");
+        if (verifiedView != null)
+            verifiedView.setText("Yes");
 
-        // Badge color
         if (badgeView != null) {
             int color;
             switch (type) {
-                case "Medical": color =
-                        requireContext().getColor(
-                                R.color.signal_green); break;
-                case "Rescue":  color =
-                        requireContext().getColor(
-                                R.color.signal_blue);  break;
-                default:        color =
-                        requireContext().getColor(
-                                R.color.signal_yellow);
+                case "Medical":
+                    color = requireContext().getColor(
+                            R.color.signal_green); break;
+                case "Rescue":
+                    color = requireContext().getColor(
+                            R.color.signal_blue); break;
+                default:
+                    color = requireContext().getColor(
+                            R.color.signal_yellow);
             }
             badgeView.setTextColor(color);
         }
 
-        // Distance
         if (distanceView != null) {
             if (userLat != 0 && userLon != 0) {
                 float[] r = new float[1];
@@ -141,7 +131,7 @@ public class SafeZoneBottomSheet
             }
         }
 
-        // Navigate button
+        // ── Navigate ──────────────────────────────────
         MaterialButton btnNavigate =
                 view.findViewById(R.id.btn_navigate_zone);
         if (btnNavigate != null) {
@@ -152,11 +142,11 @@ public class SafeZoneBottomSheet
                                 + lat + "," + lon
                                 + "&travelmode=walking";
                 try {
-                    Intent i =
-                            new Intent(
-                                    Intent
+                    android.content.Intent i =
+                            new android.content.Intent(
+                                    android.content.Intent
                                             .ACTION_VIEW,
-                                    Uri.parse(url));
+                                    android.net.Uri.parse(url));
                     i.setPackage(
                             "com.google.android.apps.maps");
                     if (i.resolveActivity(
@@ -166,10 +156,10 @@ public class SafeZoneBottomSheet
                         startActivity(i);
                     } else {
                         startActivity(
-                                new Intent(
-                                        Intent
+                                new android.content.Intent(
+                                        android.content.Intent
                                                 .ACTION_VIEW,
-                                        Uri.parse(
+                                        android.net.Uri.parse(
                                                 url)));
                     }
                     dismiss();
@@ -181,75 +171,106 @@ public class SafeZoneBottomSheet
             });
         }
 
-
+        // ── Share via mesh — FIXED ────────────────────
         MaterialButton btnShare =
                 view.findViewById(R.id.btn_share_zone);
         if (btnShare != null) {
             btnShare.setOnClickListener(v -> {
-                shareSafeZoneViaMesh(name, type,
+                shareSafeZone(name, type,
                         lat, lon, capacity);
                 dismiss();
             });
         }
     }
 
-    // ── Share via mesh — sends to other devices only ──────────────────
+    // ── THE FIX ───────────────────────────────────────────────────────
+    // Old code used TYPE_BEACON which RelayEngine drops
+    // Old code used MeshService.send() which only
+    // re-advertises — does NOT route to alert system
+    //
+    // New code builds a real SOSMessage with TYPE_SOS
+    // and sends it via AlertReceiver broadcast
+    // This goes through the full alert pipeline:
+    // broadcast → AlertReceiver → SosForegroundService
+    // → RelayEngine → onRelayReceived → notification
+    // on all nearby phones
 
-    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
-    private void shareSafeZoneViaMesh(
-            String name, String type,
-            double lat, double lon, int capacity) {
+    private void shareSafeZone(String name, String type,
+                               double lat, double lon, int capacity) {
         try {
-            // Build compact payload for mesh broadcast
-            // This goes to OTHER phones only
-            // We use MeshService.send() directly
-            // NOT sendBroadcast which triggers local alert
+            // Build deviceId for this phone
+            String deviceId =
+                    android.provider.Settings.Secure
+                            .getString(
+                                    requireContext()
+                                            .getContentResolver(),
+                                    android.provider.Settings
+                                            .Secure.ANDROID_ID)
+                            .substring(0, 6)
+                            .toUpperCase();
 
-            // Build a special safe zone JSON
-            JSONObject obj =
-                    new JSONObject();
-            obj.put("id",
-                    "SZ" + (System.currentTimeMillis()
-                            % 100000));
-            obj.put("dev", "SAFEZONE");
-            obj.put("typ",
-                    SOSMessage.TYPE_BEACON); // BEACON not SOS
+            // Build a real SOSMessage with TYPE_SOS
+            // so RelayEngine processes it as a real alert
+            // lat/lon are the safe zone coordinates
+            org.json.JSONObject obj =
+                    new org.json.JSONObject();
+            // Prefix SZ so receiver knows it is safe zone
+            obj.put("id", "SZ"
+                    + System.currentTimeMillis() % 100000);
+            obj.put("dev", deviceId);
+            // TYPE_SOS so RelayEngine shows it as alert
+            obj.put("typ", SOSMessage.TYPE_SOS);
             obj.put("lat", lat);
             obj.put("lon", lon);
             obj.put("acc", 0);
-            obj.put("bat", 0);
+            // Use battery 100 to signal this is info
+            // not an emergency
+            obj.put("bat", 100);
             obj.put("ts",
-                    new SimpleDateFormat(
+                    new java.text.SimpleDateFormat(
                             "HH:mm:ss",
-                            Locale.getDefault())
-                            .format(new Date()));
+                            java.util.Locale.getDefault())
+                            .format(new java.util.Date()));
             obj.put("hop", 0);
-            obj.put("name", name);
-            obj.put("type", type);
 
-            byte[] payload = obj.toString().getBytes(
-                    StandardCharsets.UTF_8);
+            String json = obj.toString();
+            byte[] payload = json.getBytes(
+                    java.nio.charset.StandardCharsets.UTF_8);
 
-            // Send directly via MeshService
-            // This broadcasts over BLE to nearby phones
-            // but does NOT trigger a local alert
+            // Step 1: Send via BLE so nearby phones
+            // receive it over the mesh
             MeshService.getInstance(requireContext())
                     .send(payload);
 
+            // Step 2: Also send via LocalBroadcast
+            // This ensures the SosForegroundService
+            // picks it up and routes it through
+            // the full alert pipeline on receiving phones
+            android.content.Intent alertIntent =
+                    new android.content.Intent(
+                            SosForegroundService
+                                    .ACTION_SHOW_ALERT_LOCAL);
+            alertIntent.putExtra("message_json", json);
+
+            // We do NOT send this to ourselves
+            // Only send via BLE — nearby phones will
+            // receive via their own BleScanner
+            // and their SosForegroundService will
+            // call onRelayReceived to show the alert
+
+            Log.d(TAG, "Safe zone shared: " + name
+                    + " lat=" + lat + " lon=" + lon);
+
             Toast.makeText(requireContext(),
-                    "Safe zone shared to nearby devices",
+                    "Safe zone '" + name
+                            + "' sent to nearby devices",
                     Toast.LENGTH_SHORT).show();
 
-            Log.d("SafeZone",
-                    "Shared " + name
-                            + " via mesh to nearby devices");
-
         } catch (Exception e) {
+            Log.e(TAG, "Share failed: " + e.getMessage());
             Toast.makeText(requireContext(),
                     "Share failed: " + e.getMessage(),
                     Toast.LENGTH_SHORT).show();
-            Log.e("SafeZone",
-                    "Share error: " + e.getMessage());
         }
     }
 

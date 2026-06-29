@@ -321,18 +321,7 @@
 
         </LinearLayout>
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_test_alert"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_md"
-            android:text="[DEBUG] Test Alert"
-            android:textColor="@color/warm_gray"
-            android:textSize="10sp"
-            app:layout_constraintTop_toBottomOf="@id/sos_history_section"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
+
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 

@@ -12,8 +12,7 @@ public class RelayEngine {
 
     private static final String TAG = "RelayEngine";
 
-    private static final long SEEN_TTL_MS     =
-            10 * 60 * 1000;
+    private static final long SEEN_TTL_MS     = 10 * 60 * 1000;
     private static final long RELAY_DELAY_MIN = 200;
     private static final long RELAY_DELAY_MAX = 800;
 
@@ -33,16 +32,14 @@ public class RelayEngine {
 
     public RelayEngine(Context context) {
         this.context = context.getApplicationContext();
-        this.handler =
-                new Handler(Looper.getMainLooper());
+        this.handler = new Handler(Looper.getMainLooper());
     }
 
     public void setListener(RelayListener listener) {
         this.listener = listener;
     }
 
-    public void setMeshService(
-            MeshService meshService) {
+    public void setMeshService(MeshService meshService) {
         this.meshService = meshService;
     }
 
@@ -53,13 +50,11 @@ public class RelayEngine {
         try {
             incoming = SOSMessage.fromBytes(rawBytes);
         } catch (Exception e) {
-            Log.d(TAG, "Parse failed: "
-                    + e.getMessage());
+            Log.d(TAG, "Parse failed: " + e.getMessage());
             return;
         }
 
-        Log.d(TAG, "Incoming: id="
-                + incoming.messageId
+        Log.d(TAG, "Incoming: id=" + incoming.messageId
                 + " type=" + incoming.type
                 + " from=" + incoming.deviceId
                 + " hops=" + incoming.hopCount
@@ -67,52 +62,59 @@ public class RelayEngine {
                 + " lon=" + incoming.longitude);
 
         // ── DROP 1: BEACON packets ────────────────────
-        // These are passive mesh presence signals
-        // not real emergencies — never show alert
+        // Silent mesh presence — never show alert
         if (incoming.isBeacon()) {
-            Log.d(TAG, "BEACON packet — dropping, "
-                    + "not an emergency");
+            Log.d(TAG, "BEACON — dropped silently");
             return;
         }
 
-        // ── DROP 2: SAFEZONE shares ───────────────────
-        if ("SAFEZONE".equals(incoming.deviceId)) {
-            Log.d(TAG, "Safe zone share — skipping");
-            scheduleRelay(incoming);
-            return;
-        }
-
-        // ── DROP 3: Own messages ──────────────────────
-        if (isOwnMessage(incoming)) {
-            Log.d(TAG, "OWN MESSAGE — dropping: "
-                    + incoming.deviceId);
-            return;
-        }
-
-        // ── DROP 4: Duplicates ────────────────────────
+        // ── DROP 2: Duplicates ────────────────────────
         if (isDuplicate(incoming.messageId)) {
-            Log.d(TAG, "DUPLICATE — dropping "
+            Log.d(TAG, "DUPLICATE — dropped "
                     + incoming.messageId);
             return;
         }
 
-        // ── DROP 5: Hop limit ─────────────────────────
+        // ── DROP 3: Hop limit ─────────────────────────
         if (incoming.isExpired()) {
-            Log.d(TAG,
-                    "HOP LIMIT — dropping hops="
-                            + incoming.hopCount);
+            Log.d(TAG, "HOP LIMIT — dropped hops="
+                    + incoming.hopCount);
             return;
         }
 
+        // ── Check: Is safe zone share? ────────────────
+        // Safe zone messages have messageId starting SZ
+        // They come from THIS phone but should show
+        // as alerts on OTHER phones
+        // So we skip the own-message check for them
+        boolean isSafeZoneShare =
+                incoming.messageId != null
+                        && incoming.messageId.startsWith("SZ");
+
+        // ── DROP 4: Own messages ──────────────────────
+        // Skip this check for safe zone shares
+        // because we WANT them to show on nearby phones
+        // even though they came from this device
+        if (!isSafeZoneShare && isOwnMessage(incoming)) {
+            Log.d(TAG, "OWN MESSAGE — dropped: "
+                    + incoming.deviceId);
+            return;
+        }
+
+        // Mark as seen AFTER all drops
         markSeen(incoming.messageId);
 
-        Log.d(TAG, "REAL SOS from "
-                + incoming.deviceId
-                + " lat=" + incoming.latitude
-                + " lon=" + incoming.longitude
-                + " — showing alert");
+        if (isSafeZoneShare) {
+            Log.d(TAG, "SAFE ZONE share from "
+                    + incoming.deviceId
+                    + " — showing as alert on nearby phones");
+        } else {
+            Log.d(TAG, "REAL SOS from "
+                    + incoming.deviceId
+                    + " — showing alert");
+        }
 
-        // Notify listener — show alert in UI
+        // Show alert
         if (listener != null) {
             handler.post(() ->
                     listener.onNewSosReceived(incoming));
@@ -120,7 +122,7 @@ public class RelayEngine {
             routeAlertDirectly(incoming);
         }
 
-        // Relay forward
+        // Relay forward to next phone
         scheduleRelay(incoming);
     }
 
@@ -144,7 +146,6 @@ public class RelayEngine {
 
             return ownId.startsWith(inId)
                     || inId.startsWith(ownId);
-
         } catch (Exception e) {
             return false;
         }
@@ -171,16 +172,13 @@ public class RelayEngine {
 
     // ── Direct routing ────────────────────────────────────────────────
 
-    private void routeAlertDirectly(
-            SOSMessage message) {
+    private void routeAlertDirectly(SOSMessage message) {
         handler.post(() -> {
             try {
                 android.content.Intent alert =
                         new android.content.Intent(
-                                "com.ayesha.embernet"
-                                        + ".SHOW_ALERT");
-                alert.putExtra(
-                        "message_json",
+                                "com.ayesha.embernet.SHOW_ALERT");
+                alert.putExtra("message_json",
                         message.toJson());
                 alert.setPackage(
                         context.getPackageName());
@@ -210,9 +208,7 @@ public class RelayEngine {
                 e -> (now - e.getValue()) > SEEN_TTL_MS);
     }
 
-    public int getRelayedCount() {
-        return relayedCount;
-    }
+    public int getRelayedCount() { return relayedCount; }
 
     public int getSeenCount() {
         pruneExpiredEntries();
